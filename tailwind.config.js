@@ -1,5 +1,3 @@
-# Tailwind CSS configuration
-
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [

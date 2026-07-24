@@ -1,6 +1,3 @@
-# Admin page
-
-// src/app/admin/page.js
 'use client';
 
 import Link from 'next/link';

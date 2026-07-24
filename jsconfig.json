@@ -1,5 +1,3 @@
-# JS config with path aliases
-
 {
   "compilerOptions": {
     "baseUrl": ".",
