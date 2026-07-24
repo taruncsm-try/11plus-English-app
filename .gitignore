@@ -1,0 +1,16 @@
+# Git ignore rules
+
+# Node dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js build output
+.next/
+out/
+
+# Environment files
+.env*.local
+
+# OS files
+.DS_Store
+Thumbs.db
