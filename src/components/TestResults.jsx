@@ -28,41 +28,47 @@ export default function TestResults({ results, onRestart, onRetakeMissed }) {
         // Get currently logged-in user
         const { data: { user } } = await supabase.auth.getUser();
 
-        // If user is logged in, store the test session
-        if (user) {
-          const { data: sessionData, error: sessionError } = await supabase
-            .from('test_sessions')
-            .insert([
-              {
-                student_id: user.id,
-                test_mode: config.testMode,
-                total_questions: totalQuestions,
-                score: correctCount,
-                time_taken_seconds: totalTimeTaken,
-                time_limit_seconds: config.totalTimerLimit || null,
-                is_daily_test: config.isDailyTest || false,
-              },
-            ])
-            .select()
-            .single();
+        if (!user) throw new Error('User must be signed in to save results');
 
-          if (sessionError) throw sessionError;
+        // Ensure profile exists so test_sessions.student_id foreign key is valid.
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({ id: user.id }, { onConflict: 'id' });
 
-          // Record detailed answers
-          if (sessionData && answers.length > 0) {
-            const answerPayload = answers.map((a) => ({
-              session_id: sessionData.id,
-              word_id: a.word_id,
-              student_answer: a.student_answer,
-              is_correct: a.is_correct,
-            }));
+        if (profileError) throw profileError;
 
-            const { error: answersError } = await supabase
-              .from('test_answers')
-              .insert(answerPayload);
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('test_sessions')
+          .insert([
+            {
+              student_id: user.id,
+              test_mode: config.testMode,
+              total_questions: totalQuestions,
+              score: correctCount,
+              time_taken_seconds: totalTimeTaken,
+              time_limit_seconds: config.totalTimerLimit || null,
+              is_daily_test: config.isDailyTest || false,
+            },
+          ])
+          .select()
+          .single();
 
-            if (answersError) throw answersError;
-          }
+        if (sessionError) throw sessionError;
+
+        // Record detailed answers
+        if (sessionData && answers.length > 0) {
+          const answerPayload = answers.map((a) => ({
+            session_id: sessionData.id,
+            word_id: a.word_id,
+            student_answer: a.student_answer,
+            is_correct: a.is_correct,
+          }));
+
+          const { error: answersError } = await supabase
+            .from('test_answers')
+            .insert(answerPayload);
+
+          if (answersError) throw answersError;
         }
       } catch (err) {
         console.error('Error saving test results:', err);
