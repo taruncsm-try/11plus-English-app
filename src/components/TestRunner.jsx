@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { generateDistractors } from '@/lib/distractors';
 
 export default function TestRunner({ words = [], config, onTestComplete }) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -44,19 +45,52 @@ export default function TestRunner({ words = [], config, onTestComplete }) {
   // --- 2. Shuffle Options for Mode 2 ---
   const prepareOptions = useCallback(() => {
     if (config.testMode === 'multiple_choice' && currentWordObj.word) {
-      const opts = [
-        word,
-        distractor_1 || `${word}e`,
-        distractor_2 || word.replace(/e$/, ''),
-        distractor_3 || word.replace(/i/, 'e'),
-      ].filter(Boolean);
+      // Use database distractors if available, otherwise generate them
+      let distractorsList = [];
+      
+      if (distractor_1 && distractor_2 && distractor_3) {
+        distractorsList = [distractor_1, distractor_2, distractor_3];
+      } else {
+        // Generate distractors if not in database
+        distractorsList = generateDistractors(word);
+      }
+
+      // Create options array with correct word + 3 distractors
+      const opts = [word, ...distractorsList];
+
+      // Remove any duplicates (case-insensitive)
+      const uniqueOpts = [];
+      const seenLowerCase = new Set();
+      
+      for (const opt of opts) {
+        const lowerOpt = opt.toLowerCase();
+        if (!seenLowerCase.has(lowerOpt)) {
+          uniqueOpts.push(opt);
+          seenLowerCase.add(lowerOpt);
+        }
+      }
+
+      // Ensure we have exactly 4 unique options
+      while (uniqueOpts.length < 4) {
+        const generated = generateDistractors(word);
+        for (const distractor of generated) {
+          const lowerDistractor = distractor.toLowerCase();
+          if (!seenLowerCase.has(lowerDistractor) && uniqueOpts.length < 4) {
+            uniqueOpts.push(distractor);
+            seenLowerCase.add(lowerDistractor);
+          }
+        }
+        // Safety break to prevent infinite loop
+        if (uniqueOpts.length === seenLowerCase.size) break;
+      }
 
       // Fisher-Yates Shuffle
-      for (let i = opts.length - 1; i > 0; i--) {
+      for (let i = uniqueOpts.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [opts[i], opts[j]] = [opts[j], opts[i]];
+        [uniqueOpts[i], uniqueOpts[j]] = [uniqueOpts[j], uniqueOpts[i]];
       }
-      setShuffledOptions(opts);
+      
+      setShuffledOptions(uniqueOpts.slice(0, 4));
     }
   }, [config.testMode, currentWordObj, word, distractor_1, distractor_2, distractor_3]);
 
