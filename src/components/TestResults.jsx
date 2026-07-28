@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function TestResults({ results, onRestart, onRetakeMissed }) {
   const { answers = [], totalTimeTaken = 0, config = {} } = results;
   const [isSaving, setIsSaving] = useState(true);
   const [saveError, setSaveError] = useState(null);
+  
+  // Double protection against duplicates
+  const hasSaved = useRef(false);
+  const savingInProgress = useRef(false);
 
   // Calculate metrics
   const totalQuestions = answers.length;
@@ -19,15 +23,32 @@ export default function TestResults({ results, onRestart, onRetakeMissed }) {
   const seconds = totalTimeTaken % 60;
   const formattedTime = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
+  // Generate a unique key for this test result
+  const resultKey = `test_result_${answers.map(a => a.word_id).join('_')}_${correctCount}_${totalTimeTaken}`;
+
   // --- Save Session & Answers to Supabase ---
   useEffect(() => {
+    // Multiple safeguards against duplicates
+    if (hasSaved.current) return;
+    if (savingInProgress.current) return;
+
+    // Check if this exact result was already saved in this browser session
+    if (typeof window !== 'undefined') {
+      const alreadySaved = sessionStorage.getItem(resultKey);
+      if (alreadySaved) {
+        setIsSaving(false);
+        hasSaved.current = true;
+        return;
+      }
+    }
+    
     async function saveTestSession() {
       try {
+        savingInProgress.current = true;
         setIsSaving(true);
 
         // Get currently logged-in user
         const { data: { user } } = await supabase.auth.getUser();
-
         if (!user) throw new Error('User must be signed in to save results');
 
         // Ensure profile exists so test_sessions.student_id foreign key is valid.
@@ -70,16 +91,25 @@ export default function TestResults({ results, onRestart, onRetakeMissed }) {
 
           if (answersError) throw answersError;
         }
+        
+        // Mark as saved in multiple ways
+        hasSaved.current = true;
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(resultKey, 'true');
+        }
+        
       } catch (err) {
         console.error('Error saving test results:', err);
         setSaveError('Results displayed, but couldn\'t sync to cloud.');
+        savingInProgress.current = false; // Reset on error so user can retry
       } finally {
         setIsSaving(false);
+        savingInProgress.current = false;
       }
     }
 
     saveTestSession();
-  }, [answers, config, correctCount, totalQuestions, totalTimeTaken]);
+  }, []); // Empty dependency array - only run once
 
   return (
     <div className="max-w-md mx-auto bg-white rounded-2xl shadow-xl p-6 text-slate-800 space-y-6 border border-slate-100">

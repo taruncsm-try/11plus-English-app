@@ -1,5 +1,3 @@
-# Distractors helper
-
 /**
  * Smart Distractor Generator for 11+ Spelling Tests
  * Automatically generates realistic misspellings for Multiple Choice mode.
@@ -36,47 +34,93 @@ const SPELLING_RULES = [
 /**
  * Generates 3 distinct, realistic misspellings for a given word
  * @param {string} correctWord - The target spelling word
- * @returns {string[]} Array of 3 misspelling options
+ * @returns {string[]} Array of 3 unique misspelling options
  */
 export function generateDistractors(correctWord) {
   if (!correctWord) return ['', '', ''];
 
   const cleanWord = correctWord.trim();
   const distractors = new Set();
+  const lowerCaseDistractors = new Set(); // Track lowercase versions to prevent case-insensitive duplicates
+  const lowerCorrectWord = cleanWord.toLowerCase();
+
+  // Helper function to add distractor if unique
+  const addDistractor = (distractor) => {
+    const lowerDistractor = distractor.toLowerCase();
+    if (
+      lowerDistractor !== lowerCorrectWord &&
+      !lowerCaseDistractors.has(lowerDistractor) &&
+      distractor.length > 2
+    ) {
+      distractors.add(distractor);
+      lowerCaseDistractors.add(lowerDistractor);
+      return true;
+    }
+    return false;
+  };
 
   // Try rule-based transformations first
   for (const rule of SPELLING_RULES) {
     if (distractors.size >= 3) break;
 
     const misspelling = cleanWord.replace(rule.pattern, rule.replacement);
-    if (misspelling !== cleanWord && misspelling.length > 2) {
-      distractors.add(misspelling);
+    if (misspelling !== cleanWord) {
+      addDistractor(misspelling);
     }
   }
 
-  // Fallback 1: Letter swapping adjacent characters if we don't have 3 distractors yet
+  // Fallback 1: Letter swapping adjacent characters
   if (distractors.size < 3 && cleanWord.length > 3) {
-    for (let i = 1; i < cleanWord.length - 2; i++) {
+    for (let i = 0; i < cleanWord.length - 1; i++) {
       if (distractors.size >= 3) break;
       const chars = cleanWord.split('');
       // Swap adjacent characters
       [chars[i], chars[i + 1]] = [chars[i + 1], chars[i]];
       const swapped = chars.join('');
-      if (swapped !== cleanWord) {
-        distractors.add(swapped);
+      addDistractor(swapped);
+    }
+  }
+
+  // Fallback 2: Single character modifications
+  if (distractors.size < 3) {
+    const fallbacks = [
+      `${cleanWord}e`,                    // Add 'e' at end
+      cleanWord.replace(/e$/, ''),        // Remove trailing 'e'
+      `${cleanWord}s`,                    // Add 's' at end
+      cleanWord.slice(0, -1),             // Remove last character
+      cleanWord.replace(/([aeiou])/, '$1$1'), // Double first vowel
+      cleanWord.replace(/ll/, 'l'),       // Remove double 'l'
+      cleanWord.replace(/ss/, 's'),       // Remove double 's'
+      cleanWord.replace(/tt/, 't'),       // Remove double 't'
+    ];
+
+    for (const fallback of fallbacks) {
+      if (distractors.size >= 3) break;
+      if (fallback && fallback.length > 2) {
+        addDistractor(fallback);
       }
     }
   }
 
-  // Fallback 2: Truncating or appending a common letter
-  if (distractors.size < 3) {
-    distractors.add(`${cleanWord}e`);
-    distractors.add(cleanWord.replace(/e$/, ''));
-    distractors.add(`${cleanWord}s`);
+  // Fallback 3: Random character deletion (last resort)
+  if (distractors.size < 3 && cleanWord.length > 4) {
+    for (let i = 1; i < cleanWord.length - 1; i++) {
+      if (distractors.size >= 3) break;
+      const deleted = cleanWord.slice(0, i) + cleanWord.slice(i + 1);
+      addDistractor(deleted);
+    }
   }
 
-  // Convert Set to Array and return top 3 distinct distractors
-  return Array.from(distractors)
-    .filter((d) => d.toLowerCase() !== cleanWord.toLowerCase())
-    .slice(0, 3);
+  // Convert Set to Array and return exactly 3 distinct distractors
+  const result = Array.from(distractors).slice(0, 3);
+  
+  // Ensure we always return exactly 3 distractors (pad with generic fallbacks if needed)
+  while (result.length < 3) {
+    const padding = `${cleanWord}_${result.length + 1}`;
+    if (addDistractor(padding)) {
+      result.push(padding);
+    }
+  }
+
+  return result;
 }
