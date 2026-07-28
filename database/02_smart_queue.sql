@@ -1,9 +1,12 @@
--- Function to get prioritized spelling list for a student
-create or replace function get_prioritized_spellings(
+-- Drop the old function first
+DROP FUNCTION IF EXISTS get_prioritized_spellings(uuid, int);
+
+-- Confidence-based scoring: Graduate faster, but catch regressions
+CREATE OR REPLACE FUNCTION get_prioritized_spellings(
   p_student_id uuid,
   p_limit int
 )
-returns table (
+RETURNS TABLE (
   id uuid,
   word text,
   sentence text,
@@ -12,33 +15,93 @@ returns table (
   distractor_3 text,
   priority_tier int
 ) 
-language plpgsql
-as $$
-begin
-  return query
-  with word_stats as (
-    select 
-      sw.id,
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH student_sessions AS (
+    -- Get all sessions for this student first
+    SELECT ts.id as session_id
+    FROM public.test_sessions ts
+    WHERE ts.student_id = p_student_id
+  ),
+  recent_attempts AS (
+    SELECT 
+      sw.id as word_id,
+      ta.is_correct,
+      ts.completed_at,
+      ROW_NUMBER() OVER (PARTITION BY sw.id ORDER BY ts.completed_at DESC) as attempt_rank
+    FROM public.spelling_words sw
+    LEFT JOIN public.test_answers ta ON sw.id = ta.word_id
+    LEFT JOIN public.test_sessions ts ON ta.session_id = ts.id
+    WHERE ts.id IS NULL OR ts.id IN (SELECT ss.session_id FROM student_sessions ss)
+  ),
+  word_stats AS (
+    SELECT 
+      sw.id as word_id,
       sw.word,
       sw.sentence,
       sw.distractor_1,
       sw.distractor_2,
       sw.distractor_3,
-      -- Priority 1: Has at least 1 wrong answer in history
-      -- Priority 2: Never attempted
-      -- Priority 3: attempted and all correct
-      case 
-        when count(ta.id) filter (where ta.is_correct = false) > 0 then 1
-        when count(ta.id) = 0 then 2
-        else 3
-      end as priority_tier
-    from public.spelling_words sw
-    left join public.test_answers ta on sw.id = ta.word_id
-    left join public.test_sessions ts on ta.session_id = ts.id and ts.student_id = p_student_id
-    group by sw.id
+      
+      -- Count consecutive correct answers from most recent attempt backwards
+      COALESCE(
+        (
+          SELECT COUNT(*) 
+          FROM recent_attempts ra 
+          WHERE ra.word_id = sw.id 
+            AND ra.is_correct = true
+            AND ra.completed_at IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 
+              FROM recent_attempts ra2 
+              WHERE ra2.word_id = sw.id 
+                AND ra2.is_correct = false 
+                AND ra2.completed_at > ra.completed_at
+            )
+        ), 
+        0
+      )::int as consecutive_correct_streak,
+      
+      -- Total attempts for this word (only count rows with completed_at)
+      COUNT(ra.word_id) FILTER (WHERE ra.completed_at IS NOT NULL)::int as total_attempts,
+      
+      -- Most recent attempt result
+      BOOL_OR(CASE WHEN ra.attempt_rank = 1 AND ra.completed_at IS NOT NULL THEN ra.is_correct ELSE NULL END) as last_attempt_correct
+      
+    FROM public.spelling_words sw
+    LEFT JOIN recent_attempts ra ON sw.id = ra.word_id
+    GROUP BY sw.id, sw.word, sw.sentence, sw.distractor_1, sw.distractor_2, sw.distractor_3
   )
-  select * from word_stats
-  order by priority_tier asc, random() -- Randomize within the same tier
-  limit p_limit;
-end;
+  SELECT 
+    ws.word_id,
+    ws.word,
+    ws.sentence,
+    ws.distractor_1,
+    ws.distractor_2,
+    ws.distractor_3,
+    
+    -- Smart Priority System
+    CASE 
+      -- Priority 3 (Medium): Never attempted - CHECK THIS FIRST!
+      WHEN ws.total_attempts = 0 THEN 3
+      
+      -- Priority 1 (Highest): Recently got wrong
+      WHEN ws.last_attempt_correct = false THEN 1
+      
+      -- Priority 2 (Medium-High): Only got correct once (needs confirmation)
+      WHEN ws.consecutive_correct_streak = 1 THEN 2
+      
+      -- Priority 4 (Low): Got correct 2+ times in a row (mastered)
+      WHEN ws.consecutive_correct_streak >= 2 THEN 4
+      
+      -- Fallback: treat as Priority 1 if something is unclear
+      ELSE 1
+    END
+    
+  FROM word_stats ws
+  ORDER BY 7 ASC, RANDOM()  -- Order by priority_tier (7th column), then random
+  LIMIT p_limit;
+END;
 $$;
