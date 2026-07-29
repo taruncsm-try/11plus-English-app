@@ -49,6 +49,22 @@ export default function ProgressPage() {
     fetchProgressData();
   }, []);
 
+  // Format date and time
+  const formatDateTime = (dateString) => {
+    const date = new Date(dateString);
+    const dateFormatted = date.toLocaleDateString('en-GB', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+    const timeFormatted = date.toLocaleTimeString('en-GB', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    return { date: dateFormatted, time: timeFormatted };
+  };
+
   return (
     <AuthGate>
       <main className="min-h-screen bg-slate-50 p-4 flex flex-col items-center justify-center font-sans">
@@ -101,30 +117,35 @@ export default function ProgressPage() {
                 <p className="text-[11px] text-slate-400 mt-1">Complete a practice test to see your progress!</p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                 {sessions.map((session) => {
                   const pct = Math.round((session.score / session.total_questions) * 100);
-                  const date = new Date(session.completed_at).toLocaleDateString();
+                  const { date, time } = formatDateTime(session.completed_at);
 
                   return (
-                    <div
+                    <Link
                       key={session.id}
-                      className="p-3 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between text-xs"
+                      href={`/progress/${session.id}`}
+                      className="block p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 transition-all cursor-pointer"
                     >
-                      <div>
-                        <span className="font-bold text-slate-800">
-                          {session.test_mode === 'type_in' ? '✏️ Type In' : '🎯 Multiple Choice'}
-                        </span>
-                        <p className="text-[10px] text-slate-400">{date}</p>
-                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex-1">
+                          <span className="font-bold text-slate-800 block">
+                            {session.test_mode === 'type_in' ? '✏️ Type In' : '🎯 Multiple Choice'}
+                          </span>
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            {date} • {time}
+                          </p>
+                        </div>
 
-                      <div className="text-right">
-                        <span className="font-black text-indigo-600 text-sm">
-                          {session.score}/{session.total_questions}
-                        </span>
-                        <p className="text-[10px] font-bold text-slate-500">({pct}%)</p>
+                        <div className="text-right">
+                          <span className="font-black text-indigo-600 text-sm block">
+                            {session.score}/{session.total_questions}
+                          </span>
+                          <p className="text-[10px] font-bold text-slate-500">({pct}%)</p>
+                        </div>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
