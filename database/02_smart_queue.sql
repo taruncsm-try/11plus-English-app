@@ -2,6 +2,7 @@
 DROP FUNCTION IF EXISTS get_prioritized_spellings(uuid, int);
 
 -- Confidence-based scoring: Graduate faster, but catch regressions
+-- Priority 3 (never attempted) further orders 7+ letter words before shorter ones
 CREATE OR REPLACE FUNCTION get_prioritized_spellings(
   p_student_id uuid,
   p_limit int
@@ -73,35 +74,50 @@ BEGIN
     FROM public.spelling_words sw
     LEFT JOIN recent_attempts ra ON sw.id = ra.word_id
     GROUP BY sw.id, sw.word, sw.sentence, sw.distractor_1, sw.distractor_2, sw.distractor_3
+  ),
+  ranked AS (
+    SELECT 
+      ws.word_id,
+      ws.word,
+      ws.sentence,
+      ws.distractor_1,
+      ws.distractor_2,
+      ws.distractor_3,
+      
+      -- Smart Priority System
+      CASE 
+        -- Priority 3 (Medium): Never attempted - CHECK THIS FIRST!
+        WHEN ws.total_attempts = 0 THEN 3
+        
+        -- Priority 1 (Highest): Recently got wrong
+        WHEN ws.last_attempt_correct = false THEN 1
+        
+        -- Priority 2 (Medium-High): Only got correct once (needs confirmation)
+        WHEN ws.consecutive_correct_streak = 1 THEN 2
+        
+        -- Priority 4 (Low): Got correct 2+ times in a row (mastered)
+        WHEN ws.consecutive_correct_streak >= 2 THEN 4
+        
+        -- Fallback: treat as Priority 1 if something is unclear
+        ELSE 1
+      END AS priority_tier
+      
+    FROM word_stats ws
   )
-  SELECT 
-    ws.word_id,
-    ws.word,
-    ws.sentence,
-    ws.distractor_1,
-    ws.distractor_2,
-    ws.distractor_3,
-    
-    -- Smart Priority System
-    CASE 
-      -- Priority 3 (Medium): Never attempted - CHECK THIS FIRST!
-      WHEN ws.total_attempts = 0 THEN 3
-      
-      -- Priority 1 (Highest): Recently got wrong
-      WHEN ws.last_attempt_correct = false THEN 1
-      
-      -- Priority 2 (Medium-High): Only got correct once (needs confirmation)
-      WHEN ws.consecutive_correct_streak = 1 THEN 2
-      
-      -- Priority 4 (Low): Got correct 2+ times in a row (mastered)
-      WHEN ws.consecutive_correct_streak >= 2 THEN 4
-      
-      -- Fallback: treat as Priority 1 if something is unclear
-      ELSE 1
-    END
-    
-  FROM word_stats ws
-  ORDER BY 7 ASC, RANDOM()  -- Order by priority_tier (7th column), then random
+  SELECT
+    r.word_id,
+    r.word,
+    r.sentence,
+    r.distractor_1,
+    r.distractor_2,
+    r.distractor_3,
+    r.priority_tier
+  FROM ranked r
+  ORDER BY
+    r.priority_tier ASC,
+    -- Within priority 3 only: prefer words with 7+ letters before shorter words
+    CASE WHEN r.priority_tier = 3 AND LENGTH(r.word) >= 7 THEN 0 ELSE 1 END ASC,
+    RANDOM()
   LIMIT p_limit;
 END;
 $$;
